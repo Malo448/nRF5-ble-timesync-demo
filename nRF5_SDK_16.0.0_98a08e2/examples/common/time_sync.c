@@ -839,16 +839,48 @@ uint32_t ts_enable(void)
 
 uint32_t ts_disable(void)
 {
-    // TODO:
-    //       - Close SoftDevice radio session (sd_radio_session_close())
-    //       - Stop radio activity
-    //       - Stop timers
-    //       - Disable used PPI channels
-    //       - Disable used interrupts
-    //       - Release HFCLK (sd_clock_hfclk_release()),
-    //       - Go back to low-power (mode sd_power_mode_set(NRF_POWER_MODE_LOWPWR))
-    // Care must be taken to ensure clean stop. Order of tasks above should be reconsidered.
-    return NRF_ERROR_NOT_SUPPORTED;
+    uint32_t err_code = NRF_ERROR_BUSY;
+    uint8_t i = 0;
+
+    while(err_code != NRF_SUCCESS){
+        err_code = sd_radio_session_close();
+        vTaskDelay(APP_TIMER_TICKS(10));
+    }
+
+    ts_tx_stop();
+
+    m_params.high_freq_timer[1]->TASKS_STOP = 1;
+    m_params.high_freq_timer[1]->TASKS_STOP = 1;
+    m_params.high_freq_timer[0]->TASKS_CLEAR = 1;
+    m_params.high_freq_timer[1]->TASKS_CLEAR = 1;
+
+    ppi_counter_timer_capture_disable(ppi_chn);
+    ppi_sync_timer_adjust_disable();
+
+    for(i = 0; i< 4; i++)
+    {
+        NRF_PPI->CHENCLR = (1 << m_params.ppi_chns[i]);
+
+        NRF_PPI->CH[m_params.ppi_chns[i]].EEP    = 0;
+        NRF_PPI->CH[m_params.ppi_chns[i]].TEP    = 0;
+        NRF_PPI->FORK[m_params.ppi_chns[i]].TEP  = 0;
+    }
+
+    NVIC_DisableIRQ(m_params.egu_irq_type);
+    NVIC_DisableIRQ(TIMER0_IRQn);
+    NVIC_DisableIRQ(RADIO_IRQn);
+
+    sd_clock_hfclk_release();
+    sd_power_mode_set(NRF_POWER_MODE_LOWPWR);
+
+    mp_curr_adj_pkt->timer_val = 0;
+    mp_curr_adj_pkt->rtc_val = 0;
+    mp_curr_adj_pkt->counter_val = 0;
+    m_master_counter = 0;
+
+    m_timeslot_session_open = false;
+      
+    return NRF_SUCCESS;
 }
 
 uint32_t ts_tx_start(uint32_t sync_freq_hz)
